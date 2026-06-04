@@ -1,6 +1,7 @@
 import {
   ReservationRepository,
   ReservationFilters,
+  UpdateReservationData,
 } from '../../domain/repositories/ReservationRepository';
 import { CreateReservationInput, UpdateReservationInput } from '../dto/reservation.dto';
 import { NotFoundError } from '../../shared/errors/AppError';
@@ -44,10 +45,12 @@ export class UpdateReservationUseCase {
   constructor(private readonly reservationRepository: ReservationRepository) {}
 
   execute(id: string, input: UpdateReservationInput) {
-    return this.reservationRepository.update(id, {
-      ...input,
-      ...(input.reservedAt && { reservedAt: new Date(input.reservedAt) }),
-    });
+    const { reservedAt, ...rest } = input;
+    const data: UpdateReservationData = { ...rest };
+    if (reservedAt !== undefined) {
+      data.reservedAt = new Date(reservedAt);
+    }
+    return this.reservationRepository.update(id, data);
   }
 }
 
