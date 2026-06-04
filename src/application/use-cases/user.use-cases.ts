@@ -3,7 +3,8 @@ import { PasswordHasher } from '../../infrastructure/services/PasswordHasher';
 import { CreateUserInput, UpdateUserInput } from '../dto/user.dto';
 import { UserFilters } from '../../domain/repositories/UserRepository';
 import { toPublicUser } from '../../domain/entities/User';
-import { ConflictError, NotFoundError } from '../../shared/errors/AppError';
+import { ConflictError, ForbiddenError, NotFoundError } from '../../shared/errors/AppError';
+import { isPrimaryAdminEmail } from '../../shared/constants/primaryAdmin';
 
 export class ListUsersUseCase {
   constructor(private readonly userRepository: UserRepository) {}
@@ -30,6 +31,10 @@ export class CreateUserUseCase {
   ) {}
 
   async execute(input: CreateUserInput) {
+    if (isPrimaryAdminEmail(input.email)) {
+      throw new ConflictError('Este correo está reservado para el administrador principal');
+    }
+
     const existing = await this.userRepository.findByEmail(input.email);
     if (existing) throw new ConflictError('El email ya está registrado');
 
@@ -56,9 +61,23 @@ export class UpdateUserUseCase {
     const existing = await this.userRepository.findById(id);
     if (!existing) throw new NotFoundError('Usuario no encontrado');
 
-    if (input.email && input.email !== existing.email) {
-      const emailTaken = await this.userRepository.findByEmail(input.email);
-      if (emailTaken) throw new ConflictError('El email ya está registrado');
+    if (isPrimaryAdminEmail(existing.email)) {
+      throw new ForbiddenError(
+        'La cuenta del administrador principal no puede modificarse desde Staff'
+      );
+    }
+
+    const normalizedEmail = input.email?.trim().toLowerCase();
+    const currentEmail = existing.email.toLowerCase();
+
+    if (normalizedEmail && normalizedEmail !== currentEmail) {
+      if (isPrimaryAdminEmail(normalizedEmail)) {
+        throw new ConflictError('Este correo está reservado para el administrador principal');
+      }
+      const emailTaken = await this.userRepository.findByEmail(normalizedEmail);
+      if (emailTaken && emailTaken.id !== id) {
+        throw new ConflictError('El email ya está registrado');
+      }
     }
 
     let passwordHash: string | undefined;
@@ -68,7 +87,7 @@ export class UpdateUserUseCase {
 
     const user = await this.userRepository.update(id, {
       name: input.name,
-      email: input.email,
+      email: normalizedEmail && normalizedEmail !== currentEmail ? normalizedEmail : undefined,
       passwordHash,
       role: input.role,
       position: input.position,
@@ -85,6 +104,9 @@ export class DeleteUserUseCase {
   async execute(id: string) {
     const existing = await this.userRepository.findById(id);
     if (!existing) throw new NotFoundError('Usuario no encontrado');
+    if (isPrimaryAdminEmail(existing.email)) {
+      throw new ForbiddenError('No se puede eliminar al administrador principal');
+    }
     await this.userRepository.delete(id);
   }
 }

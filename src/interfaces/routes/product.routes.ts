@@ -24,6 +24,7 @@ router.get('/:id', validate(productIdParamSchema, 'params'), getProductById);
 router.post('/', requireAdmin, validate(createProductSchema), postProduct);
 router.put(
   '/:id',
+  requireAdmin,
   validate(productIdParamSchema, 'params'),
   validate(updateProductSchema),
   putProduct

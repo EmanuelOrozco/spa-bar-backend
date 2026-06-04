@@ -83,6 +83,7 @@ npm run prisma:seed
 |--------|------|-------------|
 | POST | `/api/v1/auth/register` | Registro |
 | POST | `/api/v1/auth/login` | Login (JWT) |
+| GET | `/api/v1/auth/me` | Usuario autenticado (Bearer) |
 | POST | `/api/v1/auth/refresh` | Renovar token |
 | CRUD | `/api/v1/products` | Productos/menú/inventario |
 | CRUD | `/api/v1/orders` | Pedidos |
@@ -122,3 +123,16 @@ npm run prisma:seed
   "meta": { "page": 1, "limit": 10, "total": 100, "totalPages": 10 }
 }
 ```
+
+## Cumplimiento rúbrica (Proyecto Final Web)
+
+| Criterio | Estado |
+|----------|--------|
+| API REST `/api/v1` + CRUD ≥2 recursos | ✅ products, orders, users, tables, reservations |
+| Paginación `{ data, meta }` + filtros | ✅ query `page`, `limit`, filtros por recurso |
+| PostgreSQL + Prisma + FK | ✅ schema con relaciones |
+| JWT register/login + bcrypt + expiración | ✅ |
+| Middleware Bearer + 401/403 por rol | ✅ `authenticate`, `requireAdmin` |
+| Validaciones Zod + errores HTTP | ✅ sin stack trace en producción |
+| Clean Architecture (4 capas) | ✅ `domain`, `application`, `infrastructure`, `interfaces` |
+| `.env.example` + README | ✅ |

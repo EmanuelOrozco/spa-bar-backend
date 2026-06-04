@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { Order, OrderItem } from '../../domain/entities/Order';
+import { computeProductStatus } from '../../domain/entities/Product';
 import {
   OrderRepository,
   CreateOrderData,
@@ -37,6 +38,7 @@ function mapOrder(record: OrderWithRelations): Order {
           orderId: item.orderId,
           productId: item.productId,
           productName: item.product.name,
+          productDescription: item.product.description,
           quantity: item.quantity,
           unitPrice: toNumber(item.unitPrice),
           subtotal: toNumber(item.subtotal),
@@ -52,6 +54,69 @@ const includeRelations = {
   table: true,
   user: true,
 } as const;
+
+type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+function unavailableMessage(names: string[]) {
+  return `Producto no disponible: ${names.join(', ')}`;
+}
+
+async function validateItemsStock(
+  tx: Tx,
+  items: { productId: string; quantity: number }[]
+): Promise<void> {
+  const products = await tx.product.findMany({
+    where: { id: { in: items.map((i) => i.productId) } },
+  });
+
+  const unavailable: string[] = [];
+  for (const item of items) {
+    const product = products.find((p) => p.id === item.productId);
+    if (!product || product.stock < item.quantity) {
+      unavailable.push(product?.name ?? 'Producto desconocido');
+    }
+  }
+
+  if (unavailable.length) {
+    throw new ValidationError(unavailableMessage(unavailable), {
+      products: unavailable,
+    });
+  }
+}
+
+async function deductOrderItemsStock(
+  tx: Tx,
+  items: { productId: string; quantity: number }[]
+): Promise<void> {
+  await validateItemsStock(tx, items);
+
+  for (const item of items) {
+    const updated = await tx.product.update({
+      where: { id: item.productId },
+      data: { stock: { decrement: item.quantity } },
+    });
+    await tx.product.update({
+      where: { id: item.productId },
+      data: { status: computeProductStatus(updated.stock, updated.minStock) },
+    });
+  }
+}
+
+async function restoreOrderItemsStock(
+  tx: Tx,
+  items: { productId: string; quantity: number }[]
+): Promise<void> {
+  for (const item of items) {
+    const updated = await tx.product.update({
+      where: { id: item.productId },
+      data: { stock: { increment: item.quantity } },
+    });
+    await tx.product.update({
+      where: { id: item.productId },
+      data: { status: computeProductStatus(updated.stock, updated.minStock) },
+    });
+  }
+}
 
 export class PrismaOrderRepository implements OrderRepository {
   async findById(id: string): Promise<Order | null> {
@@ -111,6 +176,8 @@ export class PrismaOrderRepository implements OrderRepository {
         throw new ValidationError('Uno o más productos no existen');
       }
 
+      await validateItemsStock(tx, data.items);
+
       let total = 0;
       const itemsData = data.items.map((item) => {
         const product = products.find((p) => p.id === item.productId)!;
@@ -137,13 +204,6 @@ export class PrismaOrderRepository implements OrderRepository {
         include: includeRelations,
       });
 
-      for (const item of data.items) {
-        await tx.product.update({
-          where: { id: item.productId },
-          data: { stock: { decrement: item.quantity } },
-        });
-      }
-
       return order;
     });
 
@@ -151,8 +211,14 @@ export class PrismaOrderRepository implements OrderRepository {
   }
 
   async update(id: string, data: UpdateOrderData): Promise<Order> {
-    const existing = await prisma.order.findUnique({ where: { id } });
+    const existing = await prisma.order.findUnique({
+      where: { id },
+      include: { items: true },
+    });
     if (!existing) throw new NotFoundError('Pedido no encontrado');
+
+    const nextStatus = data.status ?? existing.status;
+    const statusChanging = data.status !== undefined && data.status !== existing.status;
 
     if (data.items) {
       const record = await prisma.$transaction(async (tx) => {
@@ -161,6 +227,12 @@ export class PrismaOrderRepository implements OrderRepository {
         const products = await tx.product.findMany({
           where: { id: { in: data.items!.map((i) => i.productId) } },
         });
+
+        if (products.length !== data.items!.length) {
+          throw new ValidationError('Uno o más productos no existen');
+        }
+
+        await validateItemsStock(tx, data.items!);
 
         let total = 0;
         const itemsData = data.items!.map((item) => {
@@ -193,6 +265,29 @@ export class PrismaOrderRepository implements OrderRepository {
       return mapOrder(record);
     }
 
+    if (statusChanging) {
+      const record = await prisma.$transaction(async (tx) => {
+        if (nextStatus === 'DELIVERED' && existing.status !== 'DELIVERED') {
+          await deductOrderItemsStock(tx, existing.items);
+        } else if (existing.status === 'DELIVERED' && nextStatus !== 'DELIVERED') {
+          await restoreOrderItemsStock(tx, existing.items);
+        }
+
+        const order = await tx.order.update({
+          where: { id },
+          data: {
+            ...(data.tableId !== undefined && { tableId: data.tableId }),
+            status: nextStatus,
+            ...(data.notes !== undefined && { notes: data.notes }),
+          },
+          include: includeRelations,
+        });
+
+        return order;
+      });
+      return mapOrder(record);
+    }
+
     const record = await prisma.order.update({
       where: { id },
       data: {
@@ -208,6 +303,20 @@ export class PrismaOrderRepository implements OrderRepository {
 
   async delete(id: string): Promise<void> {
     try {
+      const existing = await prisma.order.findUnique({
+        where: { id },
+        include: { items: true },
+      });
+      if (!existing) throw new NotFoundError('Pedido no encontrado');
+
+      if (existing.status === 'DELIVERED') {
+        await prisma.$transaction(async (tx) => {
+          await restoreOrderItemsStock(tx, existing.items);
+          await tx.order.delete({ where: { id } });
+        });
+        return;
+      }
+
       await prisma.order.delete({ where: { id } });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
@@ -217,20 +326,30 @@ export class PrismaOrderRepository implements OrderRepository {
     }
   }
 
-  async getStats() {
+  async getStats(userId?: string) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
     const weekAgo = new Date(today);
     weekAgo.setDate(weekAgo.getDate() - 7);
 
+    const userFilter = userId ? { userId } : {};
+
     const [todayOrders, weekOrders] = await Promise.all([
       prisma.order.findMany({
-        where: { createdAt: { gte: today }, status: { not: 'CANCELLED' } },
+        where: {
+          ...userFilter,
+          createdAt: { gte: today },
+          status: { not: 'CANCELLED' },
+        },
         select: { total: true },
       }),
       prisma.order.findMany({
-        where: { createdAt: { gte: weekAgo }, status: { not: 'CANCELLED' } },
+        where: {
+          ...userFilter,
+          createdAt: { gte: weekAgo },
+          status: { not: 'CANCELLED' },
+        },
         select: { total: true },
       }),
     ]);

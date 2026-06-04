@@ -5,6 +5,7 @@ export interface OrderItemProps {
   orderId: string;
   productId: string;
   productName: string;
+  productDescription: string | null;
   quantity: number;
   unitPrice: number;
   subtotal: number;
@@ -15,6 +16,7 @@ export class OrderItem {
   readonly orderId: string;
   readonly productId: string;
   readonly productName: string;
+  readonly productDescription: string | null;
   readonly quantity: number;
   readonly unitPrice: number;
   readonly subtotal: number;

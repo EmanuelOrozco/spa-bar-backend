@@ -55,8 +55,8 @@ export class DeleteOrderUseCase {
 export class GetOrderStatsUseCase {
   constructor(private readonly orderRepository: OrderRepository) {}
 
-  execute() {
-    return this.orderRepository.getStats();
+  execute(userId?: string) {
+    return this.orderRepository.getStats(userId);
   }
 }
 

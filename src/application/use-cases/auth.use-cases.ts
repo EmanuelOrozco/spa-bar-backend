@@ -1,8 +1,18 @@
 import { UserRepository } from '../../domain/repositories/UserRepository';
 import { PasswordHasher, TokenService } from '../../infrastructure/services/PasswordHasher';
-import { RegisterInput, LoginInput } from '../dto/auth.dto';
+import { RegisterInput, LoginInput, UpdateProfileInput } from '../dto/auth.dto';
 import { toPublicUser } from '../../domain/entities/User';
-import { ConflictError, UnauthorizedError } from '../../shared/errors/AppError';
+import { ConflictError, NotFoundError, UnauthorizedError } from '../../shared/errors/AppError';
+
+export class GetCurrentUserUseCase {
+  constructor(private readonly userRepository: UserRepository) {}
+
+  async execute(userId: string) {
+    const user = await this.userRepository.findById(userId);
+    if (!user) throw new NotFoundError('Usuario no encontrado');
+    return toPublicUser(user);
+  }
+}
 
 export class RegisterUserUseCase {
   constructor(
@@ -58,6 +68,45 @@ export class LoginUserUseCase {
       accessToken: this.tokenService.signAccess(payload),
       refreshToken: this.tokenService.signRefresh({ userId: user.id }),
       user: toPublicUser(user),
+    };
+  }
+}
+
+export class UpdateProfileUseCase {
+  constructor(
+    private readonly userRepository: UserRepository,
+    private readonly passwordHasher: PasswordHasher,
+    private readonly tokenService: TokenService
+  ) {}
+
+  async execute(userId: string, input: UpdateProfileInput) {
+    const user = await this.userRepository.findById(userId);
+    if (!user || !user.isActive) {
+      throw new UnauthorizedError('Usuario no válido');
+    }
+
+    const valid = await this.passwordHasher.compare(input.currentPassword, user.passwordHash);
+    if (!valid) {
+      throw new UnauthorizedError('La contraseña actual no es correcta');
+    }
+
+    const passwordHash = await this.passwordHasher.hash(input.newPassword);
+
+    const updated = await this.userRepository.update(userId, {
+      passwordHash,
+    });
+
+    const tokenPayload = {
+      userId: updated.id,
+      name: updated.name,
+      email: updated.email,
+      role: updated.role,
+    };
+
+    return {
+      user: toPublicUser(updated),
+      accessToken: this.tokenService.signAccess(tokenPayload),
+      refreshToken: this.tokenService.signRefresh({ userId: updated.id }),
     };
   }
 }

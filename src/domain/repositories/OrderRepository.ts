@@ -36,7 +36,7 @@ export interface OrderRepository {
   create(data: CreateOrderData): Promise<Order>;
   update(id: string, data: UpdateOrderData): Promise<Order>;
   delete(id: string): Promise<void>;
-  getStats(): Promise<{
+  getStats(userId?: string): Promise<{
     todaySales: number;
     todayOrders: number;
     weekSales: number;

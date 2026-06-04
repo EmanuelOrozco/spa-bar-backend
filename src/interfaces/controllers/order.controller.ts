@@ -15,7 +15,25 @@ import {
 import { buildPaginationMeta, parsePaginationQuery } from '../../shared/utils/pagination';
 import { sendCreated, sendNoContent, sendSuccess } from '../../shared/utils/response';
 import { OrderStatus } from '../../shared/types';
-import { UnauthorizedError } from '../../shared/errors/AppError';
+import { UnauthorizedError, ForbiddenError } from '../../shared/errors/AppError';
+import { Order } from '../../domain/entities/Order';
+
+function isAdmin(req: Request) {
+  return req.user?.role === 'admin';
+}
+
+function employeeUserId(req: Request): string | undefined {
+  if (!req.user) return undefined;
+  return isAdmin(req) ? undefined : req.user.userId;
+}
+
+function assertOrderAccess(req: Request, order: Order) {
+  if (!req.user) throw new UnauthorizedError();
+  if (isAdmin(req)) return;
+  if (order.userId !== req.user.userId) {
+    throw new ForbiddenError('No tienes permiso para acceder a este pedido');
+  }
+}
 
 const orderRepository = new PrismaOrderRepository();
 const productRepository = new PrismaProductRepository();
@@ -51,6 +69,7 @@ export async function getOrders(req: Request, res: Response, next: NextFunction)
       limit,
       search: query.search,
       status: query.status,
+      userId: employeeUserId(req),
       tableId: query.tableId,
       dateFrom: query.dateFrom ? new Date(query.dateFrom) : undefined,
       dateTo: query.dateTo ? new Date(query.dateTo) : undefined,
@@ -71,6 +90,7 @@ export async function getOrders(req: Request, res: Response, next: NextFunction)
 export async function getOrderById(req: Request, res: Response, next: NextFunction) {
   try {
     const order = await getOrder.execute(req.params.id);
+    assertOrderAccess(req, order);
     sendSuccess(res, 'Pedido obtenido', order);
   } catch (error) {
     next(error);
@@ -89,6 +109,8 @@ export async function postOrder(req: Request, res: Response, next: NextFunction)
 
 export async function putOrder(req: Request, res: Response, next: NextFunction) {
   try {
+    const existing = await getOrder.execute(req.params.id);
+    assertOrderAccess(req, existing);
     const order = await updateOrder.execute(req.params.id, req.body);
     sendSuccess(res, 'Pedido actualizado exitosamente', order);
   } catch (error) {
@@ -107,7 +129,8 @@ export async function removeOrder(req: Request, res: Response, next: NextFunctio
 
 export async function getStats(req: Request, res: Response, next: NextFunction) {
   try {
-    const stats = await getOrderStats.execute();
+    if (!req.user) throw new UnauthorizedError();
+    const stats = await getOrderStats.execute(employeeUserId(req));
     sendSuccess(res, 'Estadísticas de ventas obtenidas', stats);
   } catch (error) {
     next(error);

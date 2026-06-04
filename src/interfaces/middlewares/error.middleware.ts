@@ -3,6 +3,13 @@ import { Prisma } from '@prisma/client';
 import { AppError, ValidationError } from '../../shared/errors/AppError';
 import { ApiResponse } from '../../shared/types';
 
+const PRISMA_MESSAGES: Record<string, { status: number; message: string }> = {
+  P2002: { status: 409, message: 'El registro ya existe' },
+  P2003: { status: 400, message: 'Referencia inválida: el registro relacionado no existe' },
+  P2014: { status: 400, message: 'La relación es obligatoria y no puede eliminarse' },
+  P2025: { status: 404, message: 'Recurso no encontrado' },
+};
+
 export function errorHandler(error: Error, _req: Request, res: Response, _next: NextFunction) {
   if (error instanceof ValidationError) {
     const body: ApiResponse & { details?: Record<string, string[]> } = {
@@ -22,18 +29,20 @@ export function errorHandler(error: Error, _req: Request, res: Response, _next: 
   }
 
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
-    if (error.code === 'P2002') {
-      return res.status(409).json({
+    const mapped = PRISMA_MESSAGES[error.code];
+    if (mapped) {
+      return res.status(mapped.status).json({
         success: false,
-        message: 'El registro ya existe',
+        message: mapped.message,
       });
     }
-    if (error.code === 'P2025') {
-      return res.status(404).json({
-        success: false,
-        message: 'Recurso no encontrado',
-      });
-    }
+  }
+
+  if (error instanceof Prisma.PrismaClientValidationError) {
+    return res.status(400).json({
+      success: false,
+      message: 'Datos inválidos para la operación solicitada',
+    });
   }
 
   if (process.env.NODE_ENV !== 'production') {

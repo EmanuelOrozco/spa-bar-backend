@@ -22,7 +22,7 @@ const router = Router();
 router.use(authenticate);
 
 router.get('/stats', getStats);
-router.get('/dashboard', getDashboard);
+router.get('/dashboard', requireAdmin, getDashboard);
 router.get('/', validate(orderQuerySchema, 'query'), getOrders);
 router.get('/:id', validate(orderIdParamSchema, 'params'), getOrderById);
 router.post('/', validate(createOrderSchema), postOrder);

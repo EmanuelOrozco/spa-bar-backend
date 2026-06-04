@@ -22,5 +22,19 @@ export const refreshTokenSchema = z.object({
   refreshToken: z.string().min(1, 'Refresh token requerido'),
 });
 
+const passwordFieldSchema = z
+  .string()
+  .min(8, 'La contraseña debe tener al menos 8 caracteres')
+  .max(128)
+  .regex(/[A-Z]/, 'Debe incluir al menos una mayúscula')
+  .regex(/[a-z]/, 'Debe incluir al menos una minúscula')
+  .regex(/[0-9]/, 'Debe incluir al menos un número');
+
+export const updateProfileSchema = z.object({
+  currentPassword: z.string().min(1, 'La contraseña actual es requerida'),
+  newPassword: passwordFieldSchema,
+});
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
+export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;

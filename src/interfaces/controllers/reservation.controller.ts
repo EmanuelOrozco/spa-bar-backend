@@ -10,7 +10,7 @@ import {
 import { buildPaginationMeta, parsePaginationQuery } from '../../shared/utils/pagination';
 import { sendCreated, sendNoContent, sendSuccess } from '../../shared/utils/response';
 import { ReservationStatus } from '../../shared/types';
-import { UnauthorizedError } from '../../shared/errors/AppError';
+import { ForbiddenError, UnauthorizedError } from '../../shared/errors/AppError';
 
 const reservationRepository = new PrismaReservationRepository();
 
@@ -72,8 +72,18 @@ export async function postReservation(req: Request, res: Response, next: NextFun
   }
 }
 
+async function assertReservationAccess(req: Request, reservationId: string) {
+  if (!req.user) throw new UnauthorizedError();
+  if (req.user.role === 'admin') return;
+  const reservation = await getReservation.execute(reservationId);
+  if (reservation.userId !== req.user.userId) {
+    throw new ForbiddenError('No tienes permiso para modificar esta reserva');
+  }
+}
+
 export async function putReservation(req: Request, res: Response, next: NextFunction) {
   try {
+    await assertReservationAccess(req, req.params.id);
     const reservation = await updateReservation.execute(req.params.id, req.body);
     sendSuccess(res, 'Reserva actualizada exitosamente', reservation);
   } catch (error) {
@@ -83,6 +93,7 @@ export async function putReservation(req: Request, res: Response, next: NextFunc
 
 export async function removeReservation(req: Request, res: Response, next: NextFunction) {
   try {
+    await assertReservationAccess(req, req.params.id);
     await deleteReservation.execute(req.params.id);
     sendNoContent(res);
   } catch (error) {
